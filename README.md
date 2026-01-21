@@ -1,2 +1,2 @@
 # DVBASI_AAAI2026_Oral
-We will release the full code before the AAAI-26 conference
+We will release the full code before February
