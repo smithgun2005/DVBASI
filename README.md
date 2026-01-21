@@ -1,2 +1,2 @@
 # DVBASI_AAAI2026_Oral
-We will release the full code before February
+We will update the checkpoint very soon
