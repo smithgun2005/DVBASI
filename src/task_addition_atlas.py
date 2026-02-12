@@ -9,8 +9,7 @@ from torch.cuda.amp import GradScaler
 from src.linearize import LinearizedImageEncoder
 from src.modeling import ImageEncoder, MultiHeadImageClassifier
 from src.task_vectors import LinearizedTaskVector, NonLinearTaskVector
-from src.composition import WeightedImageEncoder, WeightedLinearizedModel, SuperWeightedImageEncoderMultiTask1, \
-    RandomWeightedImageEncoder, WeightedImageEncoderwithoutrandom, WeightedImageEncodertest
+from src.composition import WeightedImageEncoder, WeightedLinearizedModel
 from src.args import parse_arguments
 from src.eval import eval_single_dataset
 from src.datasets.registry import get_dataset
