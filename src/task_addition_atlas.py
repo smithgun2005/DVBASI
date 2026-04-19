@@ -3,7 +3,15 @@ import os
 import time
 import json
 import torch
+import warnings 
+warnings.filterwarnings("ignore", message=".*_register_pytree_node.*")
 from torch import initial_seed
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HUGGINGFACE_HUB_CACHE"] = "/root/openclip-cachedir/open_clip"
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from torch.cuda.amp import GradScaler
 from src.linearize import LinearizedImageEncoder
@@ -24,6 +32,22 @@ def avg(x):
 
 def lp_reg(x, p=None, gamma=0.5) -> torch.Tensor:
     return 0 if p is None else gamma * torch.norm(x, p=p, dim=0).mean()
+
+
+def resolve_default_save_dir(model_name):
+    candidates = [
+        f"/data/atlas/checkpoints/{model_name}",
+        f"/root/autodl-tmp/atlas-main/checkpoints/{model_name}",
+        os.path.join(
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
+            "checkpoints",
+            model_name,
+        ),
+    ]
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+    return candidates[0]
 
 
 def main(rank, args):
@@ -62,6 +86,7 @@ def main(rank, args):
         )
     else:
         with open(os.path.join(args.save, "ft_accuracies.json"), 'r') as f:
+            args.ft_acc = json.load(f)
         image_encoder = ImageEncoder(args)
         image_encoder = WeightedImageEncoder(
             image_encoder, task_vectors ,blockwise=args.blockwise_coef
@@ -114,7 +139,7 @@ def main(rank, args):
     loss_fn = torch.nn.CrossEntropyLoss()
 
     params = [p for p in ddp_model.parameters() if p.requires_grad]
-    optimizer = torch.optim.AdamW(params, lr=1e-2, weight_decay=args.wd)
+    optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.wd)
 
     if linearized_finetuning:
         head_path = os.path.join(ckpdir, "linear_svhn_1.pt")
@@ -136,20 +161,12 @@ def main(rank, args):
         dataset: args.zs_acc[dataset] / args.ft_acc[dataset]
         for dataset in datasets
     }
-    best_acc = avg(zs_acc_norm.values())
     if is_main_process():
         for dataset in datasets:
             print(
                 f"=> Zero-shot accuracy on {dataset:<12}:\t{100 * zs_acc[dataset]:.2f}%, "
                 f"normalised by f.t. acc.: {100 * zs_acc_norm[dataset]:.2f}%.")
 
-    patience = 20
-    patience_counter = 0
-
-
-
-    best_coef = None
-    val_acc = []
     for epoch in range(args.epoch):
 
         ddp_prim_loader.sampler.set_epoch(epoch)
@@ -209,64 +226,18 @@ def main(rank, args):
                     flush=True,
                 )
 
-        if is_main_process():
-            # We only need to evaluate the model on the first GPU.
-            image_encoder = ddp_model.module.image_encoder
-            all_acc = [eval_single_dataset(
-                image_encoder, dataset, args
-            )["top1"] for dataset in datasets
-                       ]
-            all_acc_norm = [
-                acc / args.ft_acc[dataset]
-                for acc, dataset in zip(all_acc, datasets)
-            ]
-
-            # Save the best coefficients.
-            if avg(all_acc_norm) > best_acc:
-                best_acc = avg(all_acc_norm)
-                best_coef = coef.data.clone()
-
-                patience_counter = 0
-                print("patience",patience_counter)
-            else:
-                patience_counter += 1
-                print("patience", patience_counter)
-
-            cur_acc = {f"{dataset}:top1": acc for dataset, acc in zip(datasets, all_acc)}
-
-            cur_acc.update({
-                f"{dataset}:normalised_top1": acc
-                for dataset, acc in zip(datasets, all_acc_norm)
-            })
-            cur_acc.update({
-                "avg:top1": avg(all_acc),
-                "avg_normalised_top1": avg(all_acc_norm)
-            })
-            val_acc.append(cur_acc)
-
-
-        stop_flag = torch.tensor(0,device='cuda')
-        if is_main_process():
-            if patience_counter >= patience:
-                print("early stopping triggered")
-                stop_flag = torch.tensor(1,device='cuda')
-        torch.distributed.broadcast(stop_flag, src=0)
-        if stop_flag.item() == 1:
-            if is_main_process():
-                print("training finished")
-            break
-
-    # Log stats and test the model with the optimal coefficients.
+    # Log stats and test the model with the final-epoch coefficients.
     datasets = [dataset.replace("Val", "") for dataset in datasets]
     if is_main_process():
-        addition_acc = {"val": val_acc}
+        addition_acc = {}
         image_encoder = ddp_model.module.image_encoder
+        final_coef = coef.data.clone()
         if linearized_finetuning:
-            image_encoder.model.coef = torch.nn.Parameter(best_coef)
-            new_params = image_encoder.model.get_optimized_params(coef=best_coef)  # 传入 best_coef
+            image_encoder.model.coef = torch.nn.Parameter(final_coef)
+            new_params = image_encoder.model.get_optimized_params(coef=final_coef)
         else:
-            image_encoder.coef = torch.nn.Parameter(best_coef)
-            new_params = image_encoder.get_optimized_params(coef=best_coef)  # 传入 best_coef
+            image_encoder.coef = torch.nn.Parameter(final_coef)
+            new_params = image_encoder.get_optimized_params(coef=final_coef)
         torch.save(new_params, head_path)
 
 
@@ -306,12 +277,21 @@ if __name__ == "__main__":
     args.num_grad_accumulation = 2 if args.model == "ViT-L-14" else 1
     args.print_every = 10
     args.datasets = datasets
-    args.epoch = 120
-    if args.seed is not None:
-        args.save = f"/data/atlas/checkpoints/{args.model}"
-    else:
-        args.save = f"/data/atlas/checkpoints/{args.model}"
-    with open(os.path.join(args.save, "zeroshot_accuracies.json"), 'r') as f:
+    args.epoch = getattr(args, "epoch", args.epochs)
+    if args.save is None:
+        args.save = resolve_default_save_dir(args.model)
+    args.save = os.path.expanduser(args.save)
+    if not os.path.isdir(args.save):
+        raise FileNotFoundError(
+            f"Checkpoint directory not found: {args.save}. "
+            "Pass --save to specify the checkpoint root."
+        )
+    zs_path = os.path.join(args.save, "zeroshot_accuracies.json")
+    if not os.path.isfile(zs_path):
+        raise FileNotFoundError(
+            f"Missing zeroshot accuracy file: {zs_path}"
+        )
+    with open(zs_path, 'r') as f:
         args.zs_acc = json.load(f)
 
     print("=" * 100)
