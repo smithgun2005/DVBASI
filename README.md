@@ -81,7 +81,7 @@ python src/task_addition_DVBASI.py \
     --lr 0.01
 ```
 
-**Linearized fine-tuning:**3
+**Linearized fine-tuning:
 
     --save checkpoints/ViT-B-32 \
     --finetuning-mode linear \
@@ -129,6 +129,6 @@ If you use this code, please cite:
 
 ## Acknowledgements
 
-This codebase builds on [Task Vectors (Ilharco et al.)](https://github.com/mlfoundations/task_vectors) and [aTLAS (Ortiz-Jimenez et al.)](https://github.com/gortizji/tangent_task_arithmetic). Dataset setup scripts are adapted from those repositories.
+This codebase builds on [Task Vectors](https://github.com/mlfoundations/task_vectors) and [aTLAS](https://github.com/fredzzhang/atlas). Dataset setup scripts are adapted from those repositories.
 
 
