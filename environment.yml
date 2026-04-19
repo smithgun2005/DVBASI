@@ -1,4 +1,4 @@
-name: atlas
+name: DVBASI
 channels:
   - pytorch
   - nvidia
