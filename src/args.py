@@ -1,14 +1,3 @@
-"""Argument list
-
-Fred Zhang <frederic.zhang@adelaide.edu.au>
-Australian Institute for Machine Learning
-
-Modified from the codebase by Ilharco et al. and Guillermo Ortiz-Jimenez et al.,
-at https://github.com/mlfoundations/task_vectors and
-at https://github.com/gortizji/tangent_task_arithmetic
-
-(Extended) Added TSV stage-1 compression flags for "TSV stage1 + opLift".
-"""
 
 import argparse
 import os
