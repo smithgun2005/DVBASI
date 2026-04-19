@@ -111,7 +111,7 @@ python src/task_addition_DVBASI.py \
 
 ## Citation
 
-If you use this code, please cite:
+If you think our work is interesting, please cite:
 
 ```bibtex
 @inproceedings{wang2026escaping,
